@@ -2,7 +2,7 @@
 // @name         YouTube Ad Listener
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @description  Listens for YouTube ad requests and mutes the video during ad breaks and skips ads when possible
+// @description  Listens for YouTube ad requests and mutes the tab during ad breaks and skips ads when possible
 // @author       You
 // @match        https://www.youtube.com/*
 // @grant        none
@@ -23,7 +23,6 @@
             if (muteButton) {
                 muteButton.click();
                 tabMuted = true;
-                mutedByUser = true;
                 console.log('Muting tab by clicking mute button');
             }
         }
@@ -78,21 +77,46 @@
     };
 
     // Skip ad implementation
-    const f = () => {
+    // Observe DOM changes to detect ad overlay elements and mute/unmute accordingly
+    const adObserver = new MutationObserver(() => {
+        const overlay = document.querySelector('.ytp-ad-player-overlay-layout');
+        const player = document.querySelector('.html5-video-player');
+        const adShowing = player && player.classList.contains('ad-showing');
+
+        if (overlay || adShowing) {
+            muteTab();
+        } else if (!mutedByUser) {
+            unmuteTab();
+        }
+    });
+    adObserver.observe(document.body, { childList: true, subtree: true });
+    // More reliable ad‑skip logic using async/await and proper delays
+    async function attemptSkipAd() {
         const btn = document.querySelector('.ytp-skip-ad-button');
         const adText = document.querySelector('.ytp-skip-ad-button__text');
-        const v = document.querySelector('video');
-        if(adText){
-            v.currentTime = v.duration
+        const video = document.querySelector('video');
+
+        if (!video) return;
+
+        // If the “Skip” text is already visible, fast‑forward the video
+        if (adText) {
+            video.currentTime = video.duration;
         }
-        if(btn){
-            v.currentTime = v.duration
-            btn.click();
-            setTimeout(2000);
-            btn.click();
-            setTimeout(4000);
+
+        // If a skip button exists, click it once after ensuring the video is at its end
+        if (btn) {
+            // Ensure the video is at its end to guarantee the ad is finished
+            video.currentTime = video.duration;
             btn.click();
         }
     }
-    setInterval(f, 100);
+
+    // Run the skip routine frequently but without overwhelming the page
+    // Observe for the appearance of the skip button and attempt to skip the ad when it appears
+    const skipObserver = new MutationObserver(() => {
+        if (document.querySelector('.ytp-skip-ad-button')) {
+            attemptSkipAd();
+        }
+    });
+    skipObserver.observe(document.body, { childList: true, subtree: true });
 })();
