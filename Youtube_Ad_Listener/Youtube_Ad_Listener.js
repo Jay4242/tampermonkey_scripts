@@ -19,11 +19,19 @@
     // Function to mute the tab
     function muteTab() {
         if (!tabMuted) {
-            const muteButton = document.querySelector('.ytp-mute-button.ytp-button');
+            // Updated selector for the new mute button structure
+            const muteButton = document.querySelector('.ytp-volume-area .ytp-mute-button button');
             if (muteButton) {
-                muteButton.click();
-                tabMuted = true;
-                console.log('Muting tab by clicking mute button');
+                // Determine if the button indicates the player is already muted (user muted)
+                const isMuted = muteButton.getAttribute('aria-label')?.includes('Unmute');
+                if (isMuted) {
+                    mutedByUser = true;
+                    console.log('User has muted the tab; respecting user mute');
+                } else {
+                    muteButton.click();
+                    tabMuted = true;
+                    console.log('Muting tab by clicking mute button');
+                }
             }
         }
     }
@@ -31,7 +39,8 @@
     // Function to unmute the tab
     function unmuteTab() {
         if (tabMuted && !mutedByUser) {
-            const muteButton = document.querySelector('.ytp-mute-button.ytp-button');
+            // Updated selector for the new mute button structure
+            const muteButton = document.querySelector('.ytp-volume-area .ytp-mute-button button');
             if (muteButton) {
                 muteButton.click();
                 tabMuted = false;
@@ -82,8 +91,10 @@
         const overlay = document.querySelector('.ytp-ad-player-overlay-layout');
         const player = document.querySelector('.html5-video-player');
         const adShowing = player && player.classList.contains('ad-showing');
+        // New ad module selector introduced by YouTube
+        const adModule = document.querySelector('.video-ads.ytp-ad-module');
 
-        if (overlay || adShowing) {
+        if (overlay || adShowing || adModule) {
             muteTab();
         } else if (!mutedByUser) {
             unmuteTab();
@@ -114,7 +125,8 @@
     // Run the skip routine frequently but without overwhelming the page
     // Observe for the appearance of the skip button and attempt to skip the ad when it appears
     const skipObserver = new MutationObserver(() => {
-        if (document.querySelector('.ytp-skip-ad-button')) {
+        if (document.querySelector('.ytp-skip-ad-button') ||
+            document.querySelector('.ytp-image-background--gradient-vertical')) {
             attemptSkipAd();
         }
     });
