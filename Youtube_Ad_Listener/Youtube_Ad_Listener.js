@@ -20,15 +20,16 @@
     function muteTab() {
         if (!tabMuted) {
             // Updated selector for the new mute button structure
-            const muteButton = document.querySelector('.ytp-volume-area .ytp-mute-button button');
+            const muteButton = document.querySelector('.ytp-mute-button');
             if (muteButton) {
                 // Determine if the button indicates the player is already muted (user muted)
                 const isMuted = muteButton.getAttribute('aria-label')?.includes('Unmute');
                 if (isMuted) {
+                    // User has manually muted; respect their choice
                     mutedByUser = true;
                     console.log('User has muted the tab; respecting user mute');
                 } else {
-                    muteButton.click();
+                    muteButton.click(); // Mute the player
                     tabMuted = true;
                     console.log('Muting tab by clicking mute button');
                 }
@@ -40,11 +41,16 @@
     function unmuteTab() {
         if (tabMuted && !mutedByUser) {
             // Updated selector for the new mute button structure
-            const muteButton = document.querySelector('.ytp-volume-area .ytp-mute-button button');
+            const muteButton = document.querySelector('.ytp-mute-button');
             if (muteButton) {
-                muteButton.click();
-                tabMuted = false;
-                console.log('Unmuting tab by clicking mute button');
+                // Only click if the player is currently muted
+                const isMuted = muteButton.getAttribute('aria-label')?.includes('Unmute');
+                if (isMuted) {
+                    muteButton.click(); // Unmute the player
+                    tabMuted = false;
+                    mutedByUser = false;
+                    console.log('Unmuting tab by clicking mute button');
+                }
             }
         }
     }
