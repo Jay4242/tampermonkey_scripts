@@ -22,14 +22,15 @@
             // Updated selector for the new mute button structure
             const muteButton = document.querySelector('.ytp-mute-button');
             if (muteButton) {
-                // Determine if the button indicates the player is already muted (user muted)
+                // Determine if the button indicates the player is currently muted
                 const isMuted = muteButton.getAttribute('aria-label')?.includes('Unmute');
                 if (isMuted) {
-                    // User has manually muted; respect their choice
+                    // Player is already muted – treat this as a user‑initiated mute
                     mutedByUser = true;
                     console.log('User has muted the tab; respecting user mute');
                 } else {
-                    muteButton.click(); // Mute the player
+                    // Player is not muted; mute it programmatically
+                    muteButton.click();
                     tabMuted = true;
                     console.log('Muting tab by clicking mute button');
                 }
