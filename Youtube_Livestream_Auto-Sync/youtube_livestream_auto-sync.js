@@ -12,13 +12,11 @@
     'use strict';
 
     function clickLiveButton() {
-        // This selector targets the "Live" button that appears when you're behind the live edge.
-        // It often has the text "LIVE" and might be part of the controls.
-        // YouTube's UI can change, so this might need adjustment in the future.
-        const liveButton = document.querySelector('button.ytp-live-badge.ytp-button:not([disabled])');
+        // Select the live badge button that is NOT disabled (i.e., when the stream is behind the live edge)
+        const liveButton = document.querySelector('.ytp-live-badge:not([disabled])');
 
-        // Ensure the button has the text "Live" and is visible
-        if (liveButton && liveButton.textContent.trim() === 'Live' && liveButton.offsetParent !== null) {
+        // Ensure the button is present and visible before clicking
+        if (liveButton && liveButton.offsetParent !== null) {
             console.log('YouTube Livestream Auto-Sync: "Live" button found and visible. Clicking to sync.');
             liveButton.click();
         }
