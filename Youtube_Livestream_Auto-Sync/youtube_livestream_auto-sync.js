@@ -24,17 +24,14 @@
 
     // Use a MutationObserver to watch for changes in the DOM, especially when the player loads or changes state.
     // This is more efficient than setInterval for detecting UI elements.
-    const observer = new MutationObserver((mutationsList, observer) => {
+    const observer = new MutationObserver(() => {
         // Check if we are on a livestream page
-        if (window.location.pathname === '/watch' && document.querySelector('.ytp-live-badge')) {
+        if (window.location.pathname === '/watch' && document.querySelector('.ytp-live-badge:not([disabled])')) {
             clickLiveButton();
         }
     });
 
     // Start observing the document body for child list changes and subtree changes
     observer.observe(document.body, { childList: true, subtree: true });
-
-    // Also run it periodically in case MutationObserver misses something or for initial load
-    setInterval(clickLiveButton, 3000); // Check every 3 seconds
 
 })();
