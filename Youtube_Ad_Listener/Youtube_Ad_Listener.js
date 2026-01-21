@@ -1,141 +1,247 @@
+/* eslint-disable spaced-comment */
 // ==UserScript==
 // @name         YouTube Ad Listener
-// @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  Listens for YouTube ad requests and mutes the tab during ad breaks and skips ads when possible
+// @namespace    https://example.com/
+// @version      1.0.0
+// @description  Mute and hide YouTube ads, and attempt to skip them when possible.
 // @author       You
 // @match        https://www.youtube.com/*
+// @run-at       document-idle
 // @grant        none
 // ==/UserScript==
+/* eslint-enable spaced-comment */
 
-(function() {
-    'use strict';
+(() => {
+  "use strict";
 
-    // Store the original XMLHttpRequest
-    const originalXHR = window.XMLHttpRequest;
-    let tabMuted = false;
-    let mutedByUser = false;
+  // Classes that definitively indicate an ad is currently playing
+  // Note: "ad-created" is NOT included because it appears even on regular videos
+  const AD_PLAYER_CLASSES = [
+    "ad-showing",
+    "ad-interrupting",
+    "ytp-ad-overlay-open",
+  ];
 
-    // Function to mute the tab
-    function muteTab() {
-        if (!tabMuted) {
-            // Updated selector for the new mute button structure
-            const muteButton = document.querySelector('.ytp-mute-button');
-            if (muteButton) {
-                // Determine if the button indicates the player is currently muted
-                const isMuted = muteButton.getAttribute('aria-label')?.includes('Unmute');
-                if (isMuted) {
-                    // Player is already muted – treat this as a user‑initiated mute
-                    mutedByUser = true;
-                    console.log('User has muted the tab; respecting user mute');
-                } else {
-                    // Player is not muted; mute it programmatically
-                    muteButton.click();
-                    tabMuted = true;
-                    console.log('Muting tab by clicking mute button');
-                }
-            }
-        }
+  const AD_ELEMENT_SELECTORS = [
+    ".video-ads",
+    ".ytp-ad-module",
+    ".ytp-ad-player-overlay-layout",
+    ".ytp-ad-persistent-progress-bar-container",
+    ".ytp-ad-overlay-container",
+    ".ytp-ad-overlay-slot",
+    ".ytp-ad-overlay",
+  ];
+
+  const AD_SIGNAL_SELECTORS = [
+    ".ytp-ad-button",
+    ".ytp-ad-badge",
+    ".ytp-ad-preview-container",
+    ".ytp-ad-text",
+    ".ytp-ad-skip-button",
+    ".ytp-ad-skip-button-modern",
+    ".ytp-skip-ad-button",
+  ];
+
+  const SKIP_BUTTON_SELECTORS = [
+    ".ytp-skip-ad-button",
+    ".ytp-ad-skip-button",
+    ".ytp-ad-skip-button-modern",
+  ];
+
+  let wasMutedBeforeAd = false;
+  let mutedByScript = false;
+  let wasVolumeBeforeAd = null;
+
+  const hideAdsStyle = () => {
+    if (document.getElementById("yt-ads-blocker-style")) {
+      return;
     }
 
-    // Function to unmute the tab
-    function unmuteTab() {
-        if (tabMuted && !mutedByUser) {
-            // Updated selector for the new mute button structure
-            const muteButton = document.querySelector('.ytp-mute-button');
-            if (muteButton) {
-                // Only click if the player is currently muted
-                const isMuted = muteButton.getAttribute('aria-label')?.includes('Unmute');
-                if (isMuted) {
-                    muteButton.click(); // Unmute the player
-                    tabMuted = false;
-                    mutedByUser = false;
-                    console.log('Unmuting tab by clicking mute button');
-                }
-            }
-        }
+    const style = document.createElement("style");
+    style.id = "yt-ads-blocker-style";
+    style.textContent = `
+      ${AD_ELEMENT_SELECTORS.join(", ")} {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+  };
+
+  const getPlayer = () => document.getElementById("movie_player");
+
+  const getVideo = () =>
+    document.querySelector("video.html5-main-video") ||
+    document.querySelector("video");
+
+  const isElementVisible = (element) => {
+    if (!element) {
+      return false;
     }
 
-    // Override XMLHttpRequest
-    window.XMLHttpRequest = function() {
-        const xhr = new originalXHR();
-        const open = xhr.open;
-        const send = xhr.send;
-        let url;
-        let adDetected = false;
+    const style = window.getComputedStyle(element);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.opacity === "0"
+    ) {
+      return false;
+    }
 
-        xhr.open = function(method, u) {
-            url = u;
-            open.apply(xhr, arguments);
-        };
+    return element.getClientRects().length > 0;
+  };
 
-        xhr.send = function() {
-            xhr.addEventListener('load', function() {
-                if (url) {
-                    if (url.startsWith('https://www.youtube.com/pagead/adview')) {
-                        console.log('Ad request detected:', url);
-                        adDetected = true;
-                        muteTab(); // Mute the tab when an ad request is detected
-                    } else if (url.startsWith('https://www.youtube.com/pagead/interaction')) {
-                        console.log('Ad interaction detected, end of ad break:', url);
-                        unmuteTab(); // Unmute the tab when ad interaction is detected
-                        adDetected = false;
-                    } else if (url.includes('label=video_companion_impression_tracking')) {
-                        console.log('Video companion impression detected, unmuting tab:', url);
-                        unmuteTab();
-                    }
-                }
-            });
-            send.apply(xhr, arguments);
-        };
+  const hasVisibleSelector = (selectors) =>
+    selectors.some((selector) =>
+      isElementVisible(document.querySelector(selector))
+    );
 
-        return xhr;
-    };
+  const isAdPlaying = () => {
+    const player = getPlayer();
+    if (!player) {
+      return false;
+    }
 
-    // Skip ad implementation
-    // Observe DOM changes to detect ad overlay elements and mute/unmute accordingly
-    const adObserver = new MutationObserver(() => {
-        const overlay = document.querySelector('.ytp-ad-player-overlay-layout');
-        const player = document.querySelector('.html5-video-player');
-        const adShowing = player && player.classList.contains('ad-showing');
-        // New ad module selector introduced by YouTube
-        const adModule = document.querySelector('.video-ads.ytp-ad-module');
+    // Primary check: "ad-showing" is the most reliable indicator
+    if (player.classList.contains("ad-showing")) {
+      return true;
+    }
 
-        if (overlay || adShowing || adModule) {
-            muteTab();
-        } else if (!mutedByUser) {
-            unmuteTab();
+    // Secondary check: other ad player classes
+    const hasAdClass = AD_PLAYER_CLASSES.some((className) =>
+      player.classList.contains(className)
+    );
+
+    if (hasAdClass) {
+      return true;
+    }
+
+    // Tertiary check: visible ad elements/signals (only if player exists)
+    const hasAdElement = hasVisibleSelector(AD_ELEMENT_SELECTORS);
+    const hasAdSignal = hasVisibleSelector(AD_SIGNAL_SELECTORS);
+
+    return hasAdSignal || hasAdElement;
+  };
+
+  const clickSkipButton = () => {
+    for (const selector of SKIP_BUTTON_SELECTORS) {
+      const skipButton = document.querySelector(selector);
+      if (
+        skipButton &&
+        !skipButton.disabled &&
+        isElementVisible(skipButton)
+      ) {
+        skipButton.click();
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const trySkipAd = () => {
+    const video = getVideo();
+    if (!video) {
+      return;
+    }
+
+    if (!clickSkipButton() && Number.isFinite(video.duration)) {
+      try {
+        video.currentTime = Math.max(0, video.duration - 0.1);
+      } catch (error) {
+        // ignore seeking errors
+      }
+    }
+  };
+
+  const setMuted = (mute) => {
+    const player = getPlayer();
+    const video = getVideo();
+
+    if (!player && !video) {
+      return;
+    }
+
+    if (mute) {
+      if (!mutedByScript) {
+        if (player && typeof player.isMuted === "function") {
+          wasMutedBeforeAd = player.isMuted();
+        } else if (video) {
+          wasMutedBeforeAd = video.muted;
+        } else {
+          wasMutedBeforeAd = false;
         }
+
+        wasVolumeBeforeAd = video ? video.volume : null;
+      }
+
+      if (player && typeof player.mute === "function") {
+        player.mute();
+      }
+
+      if (video) {
+        video.muted = true;
+        if (video.volume > 0) {
+          video.volume = 0;
+        }
+      }
+
+      mutedByScript = true;
+      return;
+    }
+
+    if (!mute && mutedByScript) {
+      if (player) {
+        if (!wasMutedBeforeAd && typeof player.unMute === "function") {
+          player.unMute();
+        } else if (wasMutedBeforeAd && typeof player.mute === "function") {
+          player.mute();
+        }
+      }
+
+      if (video) {
+        video.muted = wasMutedBeforeAd;
+        if (wasVolumeBeforeAd !== null) {
+          video.volume = wasVolumeBeforeAd;
+        }
+      }
+
+      mutedByScript = false;
+      wasVolumeBeforeAd = null;
+    }
+  };
+
+  const updateAdState = () => {
+    if (isAdPlaying()) {
+      hideAdsStyle();
+      setMuted(true);
+      trySkipAd();
+      return;
+    }
+
+    setMuted(false);
+  };
+
+  const observeDom = () => {
+    const observer = new MutationObserver(updateAdState);
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class"],
     });
-    adObserver.observe(document.body, { childList: true, subtree: true });
-    // More reliable ad‑skip logic using async/await and proper delays
-    async function attemptSkipAd() {
-        const btn = document.querySelector('.ytp-skip-ad-button');
-        const adText = document.querySelector('.ytp-skip-ad-button__text');
-        const video = document.querySelector('video');
+  };
 
-        if (!video) return;
+  const init = () => {
+    hideAdsStyle();
+    updateAdState();
+    observeDom();
+    window.setInterval(updateAdState, 1000);
+  };
 
-        // If the “Skip” text is already visible, fast‑forward the video
-        if (adText) {
-            video.currentTime = video.duration;
-        }
-
-        // If a skip button exists, click it once after ensuring the video is at its end
-        if (btn) {
-            // Ensure the video is at its end to guarantee the ad is finished
-            video.currentTime = video.duration;
-            btn.click();
-        }
-    }
-
-    // Run the skip routine frequently but without overwhelming the page
-    // Observe for the appearance of the skip button and attempt to skip the ad when it appears
-    const skipObserver = new MutationObserver(() => {
-        if (document.querySelector('.ytp-skip-ad-button') ||
-            document.querySelector('.ytp-image-background--gradient-vertical')) {
-            attemptSkipAd();
-        }
-    });
-    skipObserver.observe(document.body, { childList: true, subtree: true });
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  } else {
+    init();
+  }
 })();
