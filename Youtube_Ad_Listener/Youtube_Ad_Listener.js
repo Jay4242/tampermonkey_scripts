@@ -14,6 +14,23 @@
 (() => {
   "use strict";
 
+  // Set to true to enable debug logging
+  const DEBUG = false;
+
+  const log = (...args) => {
+    if (DEBUG) {
+      console.log("[YT-Ad-Blocker]", ...args);
+    }
+  };
+
+  const debounce = (fn, delay) => {
+    let timeout;
+    return () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(fn, delay);
+    };
+  };
+
   // Classes that definitively indicate an ad is currently playing
   // Note: "ad-created" is NOT included because it appears even on regular videos
   const AD_PLAYER_CLASSES = [
@@ -52,9 +69,27 @@
   let mutedByScript = false;
   let wasVolumeBeforeAd = null;
 
+  // Cached DOM elements
+  let cachedPlayer = null;
+  let cachedVideo = null;
+
+  const invalidateCache = () => {
+    cachedPlayer = null;
+    cachedVideo = null;
+    log("Cache invalidated");
+  };
+
   const hideAdsStyle = () => {
-    if (document.getElementById("yt-ads-blocker-style")) {
+    const existingStyle = document.getElementById("yt-ads-blocker-style");
+    
+    // Check if style exists AND is still in the document
+    if (existingStyle && document.head.contains(existingStyle)) {
       return;
+    }
+
+    // Remove orphaned style if it exists but isn't in head
+    if (existingStyle) {
+      existingStyle.remove();
     }
 
     const style = document.createElement("style");
@@ -67,13 +102,24 @@
       }
     `;
     document.head.appendChild(style);
+    log("Ad-hiding styles injected");
   };
 
-  const getPlayer = () => document.getElementById("movie_player");
+  const getPlayer = () => {
+    if (!cachedPlayer || !document.contains(cachedPlayer)) {
+      cachedPlayer = document.getElementById("movie_player");
+    }
+    return cachedPlayer;
+  };
 
-  const getVideo = () =>
-    document.querySelector("video.html5-main-video") ||
-    document.querySelector("video");
+  const getVideo = () => {
+    if (!cachedVideo || !document.contains(cachedVideo)) {
+      cachedVideo =
+        document.querySelector("video.html5-main-video") ||
+        document.querySelector("video");
+    }
+    return cachedVideo;
+  };
 
   const isElementVisible = (element) => {
     if (!element) {
@@ -105,6 +151,7 @@
 
     // Primary check: "ad-showing" is the most reliable indicator
     if (player.classList.contains("ad-showing")) {
+      log("Ad detected via ad-showing class");
       return true;
     }
 
@@ -114,6 +161,7 @@
     );
 
     if (hasAdClass) {
+      log("Ad detected via player class");
       return true;
     }
 
@@ -121,7 +169,12 @@
     const hasAdElement = hasVisibleSelector(AD_ELEMENT_SELECTORS);
     const hasAdSignal = hasVisibleSelector(AD_SIGNAL_SELECTORS);
 
-    return hasAdSignal || hasAdElement;
+    if (hasAdSignal || hasAdElement) {
+      log("Ad detected via visible elements");
+      return true;
+    }
+
+    return false;
   };
 
   const clickSkipButton = () => {
@@ -133,6 +186,7 @@
         isElementVisible(skipButton)
       ) {
         skipButton.click();
+        log("Clicked skip button:", selector);
         return true;
       }
     }
@@ -148,8 +202,9 @@
     if (!clickSkipButton() && Number.isFinite(video.duration)) {
       try {
         video.currentTime = Math.max(0, video.duration - 0.1);
+        log("Skipped to end of ad video");
       } catch (error) {
-        // ignore seeking errors
+        log("Error seeking:", error.message);
       }
     }
   };
@@ -163,6 +218,7 @@
     }
 
     if (mute) {
+      // Only save state when first muting
       if (!mutedByScript) {
         if (player && typeof player.isMuted === "function") {
           wasMutedBeforeAd = player.isMuted();
@@ -173,6 +229,7 @@
         }
 
         wasVolumeBeforeAd = video ? video.volume : null;
+        log("Saved audio state - muted:", wasMutedBeforeAd, "volume:", wasVolumeBeforeAd);
       }
 
       if (player && typeof player.mute === "function") {
@@ -181,49 +238,52 @@
 
       if (video) {
         video.muted = true;
-        if (video.volume > 0) {
-          video.volume = 0;
-        }
       }
 
       mutedByScript = true;
       return;
     }
 
-    if (!mute && mutedByScript) {
-      if (player) {
-        if (!wasMutedBeforeAd && typeof player.unMute === "function") {
+    // Restore state when unmuting
+    if (mutedByScript) {
+      if (!wasMutedBeforeAd) {
+        if (player && typeof player.unMute === "function") {
           player.unMute();
-        } else if (wasMutedBeforeAd && typeof player.mute === "function") {
-          player.mute();
+        }
+        if (video) {
+          video.muted = false;
         }
       }
 
-      if (video) {
-        video.muted = wasMutedBeforeAd;
-        if (wasVolumeBeforeAd !== null) {
-          video.volume = wasVolumeBeforeAd;
-        }
+      if (video && wasVolumeBeforeAd !== null) {
+        video.volume = wasVolumeBeforeAd;
       }
 
+      log("Restored audio state - muted:", wasMutedBeforeAd, "volume:", wasVolumeBeforeAd);
       mutedByScript = false;
       wasVolumeBeforeAd = null;
     }
   };
 
   const updateAdState = () => {
-    if (isAdPlaying()) {
-      hideAdsStyle();
-      setMuted(true);
-      trySkipAd();
-      return;
-    }
+    try {
+      if (isAdPlaying()) {
+        hideAdsStyle();
+        setMuted(true);
+        trySkipAd();
+        return;
+      }
 
-    setMuted(false);
+      setMuted(false);
+    } catch (error) {
+      log("Error in updateAdState:", error.message);
+    }
   };
 
+  const debouncedUpdateAdState = debounce(updateAdState, 100);
+
   const observeDom = () => {
-    const observer = new MutationObserver(updateAdState);
+    const observer = new MutationObserver(debouncedUpdateAdState);
     observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
@@ -232,11 +292,30 @@
     });
   };
 
-  const init = () => {
+  const handleNavigation = () => {
+    log("Navigation detected, reinitializing");
+    invalidateCache();
     hideAdsStyle();
     updateAdState();
-    observeDom();
-    window.setInterval(updateAdState, 1000);
+  };
+
+  const init = () => {
+    try {
+      hideAdsStyle();
+      updateAdState();
+      observeDom();
+
+      // Fallback interval - less frequent since MutationObserver handles most cases
+      window.setInterval(updateAdState, 2000);
+
+      // Handle YouTube SPA navigation
+      window.addEventListener("yt-navigate-finish", handleNavigation);
+      window.addEventListener("yt-navigate-start", invalidateCache);
+
+      log("Initialized successfully");
+    } catch (error) {
+      console.error("[YT-Ad-Blocker] Initialization error:", error);
+    }
   };
 
   if (document.readyState === "loading") {
