@@ -29,6 +29,11 @@
         liked = true;
     }
 
+    function isAdPlaying() {
+        const player = document.querySelector('#movie_player');
+        return player && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'));
+    }
+
     function onTimeUpdate() {
         if (liked || isLiked()) {
             if (timeUpdateHandler) {
@@ -37,6 +42,7 @@
             }
             return;
         }
+        if (isAdPlaying()) return;
         const video = document.querySelector('video.html5-main-video');
         if (!video || !video.duration || video.readyState < 1) return;
         if (video.currentTime / video.duration >= likePercent) {
