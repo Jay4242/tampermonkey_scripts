@@ -37,8 +37,8 @@
             }
             return;
         }
-        const video = document.querySelector('video');
-        if (!video || !video.duration) return;
+        const video = document.querySelector('video.html5-main-video');
+        if (!video || !video.duration || video.readyState < 1) return;
         if (video.currentTime / video.duration >= likePercent) {
             doLike();
             if (timeUpdateHandler) {
@@ -54,7 +54,9 @@
         }
         liked = false;
         timeUpdateHandler = onTimeUpdate;
-        document.addEventListener('timeupdate', onTimeUpdate, true);
+        setTimeout(function () {
+            document.addEventListener('timeupdate', onTimeUpdate, true);
+        }, 3000);
     }
 
     window.addEventListener('yt-navigate-finish', startWatcher, true);
