@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube autolike
 // @namespace
-// @version      2.0
+// @version      2.1
 // @description  Auto-like YouTube video after watching a set percentage (default 80%).
 // @match        https://www.youtube.com/*
 // @grant        none
@@ -15,6 +15,16 @@
     const likePercent = 0.8;
     var liked = false;
     var timeUpdateHandler = null;
+    var lastVideoId = null;
+    var startTimer = null;
+
+    function isWatchPage() {
+        return location.pathname === '/watch';
+    }
+
+    function getVideoId() {
+        return new URLSearchParams(location.search).get('v');
+    }
 
     function isLiked() {
         const btn = document.querySelector(likeSelector);
@@ -34,36 +44,53 @@
         return player && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'));
     }
 
+    function removeListener() {
+        if (timeUpdateHandler) {
+            document.removeEventListener('timeupdate', timeUpdateHandler, true);
+            timeUpdateHandler = null;
+        }
+    }
+
     function onTimeUpdate() {
-        if (liked || isLiked()) {
-            if (timeUpdateHandler) {
-                document.removeEventListener('timeupdate', timeUpdateHandler, true);
-                timeUpdateHandler = null;
-            }
+        if (liked) {
+            removeListener();
             return;
         }
+        if (isLiked()) return;
         if (isAdPlaying()) return;
         const video = document.querySelector('video.html5-main-video');
         if (!video || !video.duration || video.readyState < 1) return;
         if (video.currentTime / video.duration >= likePercent) {
             doLike();
-            if (timeUpdateHandler) {
-                document.removeEventListener('timeupdate', timeUpdateHandler, true);
-                timeUpdateHandler = null;
-            }
+            removeListener();
         }
     }
 
     function startWatcher() {
-        if (timeUpdateHandler) {
-            document.removeEventListener('timeupdate', timeUpdateHandler, true);
+        removeListener();
+        if (startTimer) {
+            clearTimeout(startTimer);
+            startTimer = null;
         }
         liked = false;
         timeUpdateHandler = onTimeUpdate;
-        setTimeout(function () {
+        startTimer = setTimeout(function () {
+            startTimer = null;
             document.addEventListener('timeupdate', onTimeUpdate, true);
         }, 3000);
     }
 
-    window.addEventListener('yt-navigate-finish', startWatcher, true);
+    function onUrlChange() {
+        if (!isWatchPage()) {
+            lastVideoId = null;
+            return;
+        }
+        var newId = getVideoId();
+        if (!newId || newId === lastVideoId) return;
+        lastVideoId = newId;
+        startWatcher();
+    }
+
+    window.addEventListener('yt-navigate-finish', onUrlChange);
+    setInterval(onUrlChange, 1000);
 })();
